@@ -1,0 +1,79 @@
+#!/bin/bash
+
+# TO INSTALL:
+# WARNING. EXISTING DB WILL BE REMOVED
+#  bash install -force
+
+set -e
+
+if [ ! -e "db.conf" ]
+then
+  echo "db.conf file is missing" >&2
+  exit 1
+fi
+
+. db.conf
+
+if [ "x$1" != "x--force" ]
+then
+  echo -e "This script will remove currently installed DB.\n" >&2
+  echo "To upgrade currently installed DB:" >&2
+  echo -e "  ./migrate\n" >&2
+  echo "To proceed with all data loss start:" >&2
+  echo -e "  bash install --force\n" >&2
+  exit 1
+fi
+
+
+if mysql $dbname -u$user -p$pass <<< "exit" 2>/dev/null
+then
+  echo "Performing DB backup..."
+  mkdir -p backup
+  backup="backup/$(date +%y%m%d-%H%M%S)-install.sql.bz2"
+  mysqldump -u$user -p$pass $dbname | bzip2 >$backup
+  echo -e "Backup has been saved to $backup\n"
+  exist=1
+else
+  exist=0
+fi
+
+if [ "x$2" == "x--drop" -a $exist -eq 1 ]
+then
+  echo -e "Dropping $dbname DB...\n"
+  mysql $dbname -u$user -p$pass <<< "DROP DATABASE IF EXISTS $dbname;"
+  exist=0
+fi
+
+if [ $exist -eq 0 ]
+then
+  echo "Creating $dbname DB..."
+  echo "Enter MySQL's root password."
+  mysql -uroot -p <<EOF
+CREATE DATABASE IF NOT EXISTS $dbname CHARACTER SET utf8 COLLATE utf8_general_ci;
+USE $dbname;
+
+GRANT ALL ON $dbname.* TO '$user'@'localhost' IDENTIFIED BY '$pass';
+EOF
+fi
+
+echo "installing $dbname model..."
+(
+  echo "BEGIN;"
+  echo "DROP TABLE IF EXISTS settings;"
+  cat model/main.sql model/triggers.sql
+  echo "COMMIT;"
+) | mysql -u$user -p$pass $dbname
+
+echo "installing $dbname data..."
+(
+  echo "BEGIN;"
+  for sql in sections organizations organizations1 groups places events news tags media persons objects_media events_places tags_objects places_organizations exhibitions
+  do
+    cat data/$sql.sql
+  done
+  echo "COMMIT;"
+) | mysql -u$user -p$pass $dbname
+
+./migrate --no-backup
+
+echo "ok"

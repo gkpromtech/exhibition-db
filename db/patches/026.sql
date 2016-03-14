@@ -1,0 +1,1 @@
+update business_sections set organizationid = (organizationid - 1) where num > 2;

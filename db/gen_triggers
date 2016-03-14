@@ -1,0 +1,109 @@
+#!/bin/bash
+
+tables=(`sed -n '/CREATE TABLE/{/ changes (/d;s/^[ ]*CREATE[ ]\+TABLE[ ]\+\([^ (]\+\).*/\1/g;p}' model/model.sql`)
+out=model/triggers.sql
+
+echo -n >$out
+
+ignoredObjectTables=(objects objects_media events_organizations events_persons events_places places_organizations sections_places )
+
+for table in ${tables[@]}
+do
+  if [ $table != persons ]
+  then
+  ins="\
+CREATE TRIGGER ${table}_insert AFTER INSERT ON $table
+FOR EACH ROW INSERT INTO changes(entity, changetype, rowid) VALUES('$table', 0, NEW.id);"
+  else
+    ins="\
+DELIMITER //
+CREATE TRIGGER ${table}_insert AFTER INSERT ON $table
+FOR EACH ROW
+BEGIN
+  INSERT INTO changes(entity, changetype, rowid) VALUES('$table', 0, NEW.id);$extras
+  INSERT INTO persons_auth(personId, pin) VALUES(NEW.id, LPAD(FLOOR(RAND() * 10000), 4, '0'));
+END //
+DELIMITER ;"
+  fi
+
+
+  if [ $table != news -a $table != news_tr -a $table != objects_media -a $table != persons_auth ]
+  then
+    cat << SQL >>$out
+
+-- $table
+
+DROP TRIGGER IF EXISTS ${table}_insert;
+DROP TRIGGER IF EXISTS ${table}_update;
+DROP TRIGGER IF EXISTS ${table}_delete;
+
+$ins
+
+CREATE TRIGGER ${table}_update AFTER UPDATE ON $table
+FOR EACH ROW INSERT INTO changes(entity, changetype, rowid) VALUES('$table', 1, NEW.id);
+
+CREATE TRIGGER ${table}_delete AFTER DELETE ON $table
+FOR EACH ROW INSERT INTO changes(entity, changetype, rowid) VALUES('$table', 2, OLD.id);
+
+SQL
+  fi
+
+
+  if [[ ! " ${ignoredObjectTables[@]} " =~ " $table " && ! $table =~ _tr$ ]]
+  then
+    cat << SQL1 >>$out
+
+DROP TRIGGER IF EXISTS ${table}_object_insert;
+
+DELIMITER //
+CREATE TRIGGER ${table}_object_insert BEFORE INSERT ON $table
+FOR EACH ROW
+BEGIN
+    INSERT INTO objects(createtime) VALUES(CURRENT_TIMESTAMP);
+    SET NEW.id = LAST_INSERT_ID();
+    SET @last_inserted_id = NEW.id;
+END //
+
+DELIMITER ;
+SQL1
+  fi
+
+
+done
+
+    cat << SQL >>$out
+
+-- objects_media
+
+DROP TRIGGER IF EXISTS objects_media_insert;
+DROP TRIGGER IF EXISTS objects_media_update;
+DROP TRIGGER IF EXISTS objects_media_delete;
+
+DELIMITER //
+CREATE TRIGGER objects_media_insert AFTER INSERT ON objects_media
+FOR EACH ROW
+BEGIN
+    IF (SELECT count(id) FROM news WHERE id=NEW.objectid LIMIT 1) = 0 THEN
+        INSERT INTO changes(entity, changetype, rowid) VALUES('objects_media', 0, NEW.id);
+    END IF;
+END //
+
+CREATE TRIGGER objects_media_update AFTER UPDATE ON objects_media
+FOR EACH ROW
+BEGIN
+    IF (SELECT count(id) FROM news WHERE id=NEW.objectid LIMIT 1) = 0 THEN
+        INSERT INTO changes(entity, changetype, rowid) VALUES('objects_media', 1, NEW.id);
+    END IF;
+END //
+
+CREATE TRIGGER objects_media_delete BEFORE DELETE ON objects_media
+FOR EACH ROW
+BEGIN
+    IF (SELECT count(id) FROM news WHERE id=OLD.id LIMIT 1) = 0 THEN
+        INSERT INTO changes(entity, changetype, rowid) VALUES('objects_media', 2, OLD.id);
+    END IF;
+END //
+
+DELIMITER ;
+
+SQL

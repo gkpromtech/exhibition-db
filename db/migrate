@@ -1,0 +1,80 @@
+#!/bin/bash
+
+set -euo pipefail
+
+trap '
+echo -e "\nError #$? while migrating DB\n\n"
+if [ -n "${backup+x}" ]
+then
+  echo -e "To restore DB from backup enter:\n\nbzcat $backup | mysql -u$user -p $dbname\n\n"
+fi
+' EXIT
+
+if [ ! -e "db.conf" ]
+then
+  echo "db.conf file is missing" >&2
+  exit 1
+fi
+
+. db.conf
+patch_sql=tmp/migrate.sql
+
+version=$(mysql --skip-column-names -u$user -p$pass $dbname <<< "SELECT value FROM settings WHERE name = 'version';" 2>/dev/null || true)
+
+test -n "$version" || version=0
+
+migrate_version=$(find patches/ -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | sed 's/\.[^\.]\+$//g;s/^[0]\+//g' | sort -nr | head -1)
+
+echo "current version: $version"
+echo "available version: $migrate_version"
+
+echo
+
+if [ $version -lt $migrate_version ]
+then
+  if [ x$@ != x--no-backup ]
+  then
+    echo "Performing DB backup..."
+    mkdir -p backup
+    backup="backup/$(date +%y%m%d-%H%M%S)-migrate.sql.bz2"
+    mysqldump -u$user -p$pass $dbname | bzip2 >$backup
+    echo -e "Backup has been saved to $backup\n"
+  fi
+
+  echo "Migrating DB..."
+  mkdir -p tmp
+
+  start_version=$version
+  target_version=$migrate_version
+
+  has_patch=0
+  last_version=$start_version
+  for ((version = $start_version + 1; version <= $target_version; ++version))
+  do
+    echo "-- script to update DB version $start_version => $target_version" > $patch_sql
+    echo -e "BEGIN;\n" >> $patch_sql
+    file_name=$(printf "%03d\n" $version)
+    patch_script=patches/$file_name.sql
+    if [ -e "$patch_script" ]
+    then
+      has_patch=1
+      echo "performing patch $last_version => $version"
+      echo -e "\n-- PATCH $last_version => $version" >> $patch_sql
+      cat "$patch_script" >> $patch_sql
+      last_version=$version
+    fi
+    echo -e "\n-- Patch version to latest available $last_version" >> $patch_sql
+    echo -e "\nUPDATE settings SET value = $version WHERE name='version';" >> $patch_sql
+    echo -e "\n\nCOMMIT;" >> $patch_sql
+    res=$(mysql -v -u$user -p$pass $dbname < $patch_sql | tail) || (r=$?; echo -e "\n\n$res"; exit $r)
+  done
+  
+  echo "DB has been successfully migrated."
+else
+  echo "DB is up to date."
+fi
+
+rm -f $patch_sql
+rmdir --ignore-fail-on-non-empty $(dirname $patch_sql)
+
+trap '' EXIT

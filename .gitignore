@@ -1,0 +1,6 @@
+.hg
+.hgignore
+/db/mysql_password
+*.creator.user
+/db/db.conf
+/db/backup

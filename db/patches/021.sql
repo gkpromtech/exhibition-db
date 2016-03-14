@@ -1,0 +1,1 @@
+ALTER TABLE persons_tr ADD rank VARCHAR(500) DEFAULT NULL AFTER name;

@@ -1,0 +1,1 @@
+ALTER TABLE online ADD preview VARCHAR(256) AFTER url2;

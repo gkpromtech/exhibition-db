@@ -1,0 +1,3 @@
+#!/bin/sh
+
+find db -type f -a \! -regex '.*/tmp/.*\|.*~\|.*/backup/.*' | sort > exhibition-db.files
