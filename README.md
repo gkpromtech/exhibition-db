@@ -25,7 +25,7 @@ You need to rename file ```db.conf.example``` and modify parameters:
 
 Next, run script:
 
-> bash -e ./install --force -- drop
+> bash -e ./install --force --drop
 
 Parameters:
 
