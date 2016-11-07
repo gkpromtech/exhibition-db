@@ -41,11 +41,11 @@ Setup process:
 
 ## License
 
-Copyright 2016 gkpromtech 
+Copyright 2016 primesoftpro 
 
-https://gkpromtech.ru
+https://primesoftpro.ru
 
-info@gkptomtech.ru
+info@primesoftpro.ru
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
